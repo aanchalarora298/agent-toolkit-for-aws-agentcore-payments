@@ -2,16 +2,18 @@
 name: agents-build
 description: >
   Use when adding capabilities to an existing agent project — memory,
-  app integration, VPC, multi-agent, migration, model changes, browser,
-  code interpreter, or resource removal. Triggers on: "add memory",
-  "remember across sessions", "call agent from app", "invoke agent from
-  code", "auth to call agent", "streaming responses", "VPC", "VPC
-  connectivity", "VPC error", "can't reach from VPC", "multi-agent",
-  "A2A", "A2A auth", "orchestrator not delegating", "specialist not
-  called", "migrate Bedrock Agent", "after import", "migration issue",
-  "framework for migration", "change model", "browser tool", "code
-  interpreter", "delete agent", "tear down", "agentcore remove",
-  "cross-account memory", "resource-based policy on memory".
+  payments, app integration, VPC, multi-agent, migration, model changes,
+  browser, code interpreter, or resource removal. Triggers on: "add memory",
+  "remember across sessions", "add payments", "402 payment required",
+  "x402", "pay for content", "paywall", "micropayment", "paid API",
+  "payment instrument", "payment session", "call agent from app",
+  "invoke agent from code", "auth to call agent", "streaming responses",
+  "VPC", "VPC connectivity", "VPC error", "can't reach from VPC",
+  "multi-agent", "A2A", "A2A auth", "orchestrator not delegating",
+  "specialist not called", "migrate Bedrock Agent", "after import",
+  "migration issue", "framework for migration", "change model",
+  "browser tool", "code interpreter", "delete agent", "tear down",
+  "agentcore remove", "cross-account memory", "resource-based policy on memory".
   Not for connecting to external APIs via Gateway — use agents-connect.
   Not for scaffolding a new project — use agents-get-started.
   Not for CLI/dev server errors — use agents-debug.
@@ -31,6 +33,7 @@ Add capabilities to your AgentCore agent project.
 ## When to use
 
 - Adding cross-session memory to your agent
+- Adding payments so your agent can pay for x402-protected content and APIs
 - Calling your deployed agent from a web app, mobile app, or backend service
 - Configuring VPC networking for private resources (RDS, internal APIs)
 - Building multi-agent systems with orchestrator/specialist patterns
@@ -49,8 +52,8 @@ Do NOT use for:
 
 `$ARGUMENTS` can be:
 
-- A capability: "memory", "integrate", "vpc", "multi-agent", "migrate", "browser", "code-interpreter", "teardown"
-- A description of what they want: "remember user preferences", "call from React app", "scrape a website", "run pandas in the agent", "delete my agent", "clean up resources"
+- A capability: "memory", "payments", "integrate", "vpc", "multi-agent", "migrate", "browser", "code-interpreter", "teardown"
+- A description of what they want: "remember user preferences", "pay for x402 content", "call from React app", "scrape a website", "run pandas in the agent", "delete my agent", "clean up resources"
 - Empty — the skill will determine the workflow from context
 
 ## Process
@@ -87,6 +90,7 @@ Based on the developer's prompt and `$ARGUMENTS`, load the appropriate reference
 | Developer intent | Reference to load |
 |---|---|
 | Add memory, remember things, user preferences, cross-session | [`references/memory.md`](references/memory.md) |
+| Add payments, 402 Payment Required, x402, pay for content, paywall, micropayment, paid API, payment instrument, payment session | [`references/payments/payments.md`](references/payments/payments.md) |
 | Call agent from app, invoke from code, streaming, SDK client, agent URL, execute shell in session | [`references/integrate.md`](references/integrate.md) |
 | VPC, private network, RDS, internal API, subnet, security group | [`references/vpc.md`](references/vpc.md) |
 | Multi-agent, orchestrator, specialist, A2A, delegation, agent handoff | [`references/multi-agent.md`](references/multi-agent.md) |
