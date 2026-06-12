@@ -1,33 +1,23 @@
 # Agent Wiring Code
 
-Once the developer confirms delegation and funding are done, **modify their existing agent code** to add a custom x402-aware fetch tool. This tool:
-1. Makes an HTTP request to the target URL
-2. If it gets 402, extracts the x402 challenge from the response body or `payment-required` header
-3. Calls `ProcessPayment` to get a signed payment proof
-4. Retries the request with the `X-PAYMENT` header (using a fresh HTTP client to avoid cookie contamination)
-5. Returns the paid content
+Once the developer confirms delegation and funding are done, **modify their existing agent code** to add a custom x402-aware fetch tool.
 
 **Find the agent's entrypoint file** (e.g., `main.py`, `app.py`, or the file containing the `Agent(...)` constructor). Based on the framework detected in Step 1, use the appropriate pattern below.
 
-> [!IMPORTANT]
 > **Why a custom tool instead of the AgentCorePaymentsPlugin?**
 > The `AgentCorePaymentsPlugin` works by intercepting tool results via an
 > `after_tool_call` hook. It only works when the tool surfaces the full HTTP
-> response (status code + x402 challenge) in its result. Many tools (including
-> the default `http_request` from strands_tools) don't expose response headers
-> where the x402 challenge often lives.
+> response. Many tools do not expose response headers where the x402 challenge
+> often lives.
 >
 > The custom `x402_fetch` tool handles the full flow internally:
 > request → detect 402 → extract challenge (body OR header) → ProcessPayment →
 > build proof → retry with fresh client → return content.
 >
-> **Critical: Use a fresh httpx client for the retry.** Some merchants (e.g.,
-> Grapevine/Cloudflare) set cookies on the 402 response that will cause the
-> retry to fail if sent back. Always retry without cookies.
+> **Critical: Use a fresh httpx client for the retry.** Some merchants set cookies
+> on the 402 response that cause the retry to fail if sent back.
 
-## Core payment logic (shared across all frameworks)
-
-This is the payment handling function used by all framework integrations. The framework-specific code below wraps this in the appropriate tool decorator:
+## Core Payment Logic (shared across all frameworks)
 
 ```python
 import os
@@ -40,11 +30,34 @@ import boto3
 PAYMENT_MANAGER_ARN = os.getenv("PAYMENT_MANAGER_ARN")
 PAYMENT_INSTRUMENT_ID = os.getenv("PAYMENT_INSTRUMENT_ID")
 PAYMENT_SESSION_ID = os.getenv("PAYMENT_SESSION_ID")
-PAYMENT_USER_ID = os.getenv("PAYMENT_USER_ID", "default-user")
+PAYMENT_USER_ID = os.environ.get("PAYMENT_USER_ID")  # Required — no insecure default
 REGION = os.getenv("AWS_REGION", "us-west-2")
 
 # AgentCore Payments data plane client
 _dp_client = boto3.client("bedrock-agentcore", region_name=REGION) if PAYMENT_MANAGER_ARN else None
+
+
+def _validate_url(url: str) -> str | None:
+    """Validate URL is HTTPS and not targeting private/internal networks."""
+    from urllib.parse import urlparse
+    import ipaddress
+    import socket
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return "Only HTTPS URLs are supported for payment requests"
+
+    # Resolve hostname and block private/internal IP ranges
+    try:
+        addrinfos = socket.getaddrinfo(parsed.hostname, parsed.port or 443)
+        for family, _, _, _, sockaddr in addrinfos:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local:
+                return "Cannot fetch private/internal network addresses"
+    except socket.gaierror:
+        return "Cannot resolve hostname"
+
+    return None
 
 
 def _x402_fetch_impl(url: str, method: str = "GET") -> str:
@@ -53,6 +66,18 @@ def _x402_fetch_impl(url: str, method: str = "GET") -> str:
     If the endpoint returns 402 Payment Required with an x402 challenge,
     automatically processes the payment and retries with proof.
     """
+    # Validate URL (HTTPS-only, no private IPs)
+    url_error = _validate_url(url)
+    if url_error:
+        return json.dumps({"error": url_error})
+
+    # Validate PAYMENT_USER_ID is set
+    if not PAYMENT_USER_ID:
+        return json.dumps({"error": "PAYMENT_USER_ID environment variable is required"})
+
+    # NOTE: Payment Sessions enforce service-level budget and time limits
+    # (expiryTimeInMinutes). Keep sessions short-lived to bound spending.
+
     # First attempt
     response = httpx.request(method, url, timeout=30)
 
@@ -65,7 +90,7 @@ def _x402_fetch_impl(url: str, method: str = "GET") -> str:
     # --- Got 402: Extract x402 challenge ---
     x402_challenge = None
 
-    # Try response body first (Grapevine / standard x402 v1 style)
+    # Try response body first (standard x402 v1 style)
     try:
         body_json = response.json()
         if "x402Version" in body_json and "accepts" in body_json:
@@ -73,7 +98,7 @@ def _x402_fetch_impl(url: str, method: str = "GET") -> str:
     except Exception:
         pass
 
-    # Fall back to payment-required header (base64-encoded, Node4All style)
+    # Fall back to payment-required header (base64-encoded)
     if not x402_challenge:
         header_val = response.headers.get("payment-required")
         if header_val:
@@ -150,14 +175,12 @@ def _x402_fetch_impl(url: str, method: str = "GET") -> str:
     ).decode()
 
     # --- Retry with payment proof (fresh client to avoid cookie contamination) ---
-    retry_response = httpx.Client(cookies=None).request(
-        method, url,
-        headers={"X-PAYMENT": payment_header},
-        timeout=30
-    )
-    # NOTE: Do not persist the X-PAYMENT header for subsequent requests.
-    # Some frameworks (e.g., Playwright, requests.Session) carry headers across
-    # calls. The payment proof is single-use and should not leak to other URLs.
+    with httpx.Client(verify=True) as client:
+        retry_response = client.request(
+            method, url,
+            headers={"X-PAYMENT": payment_header},
+            timeout=30
+        )
 
     return json.dumps({
         "status_code": retry_response.status_code,
@@ -258,6 +281,6 @@ result = asyncio.run(Runner.run(agent, "Fetch https://paid-api.example.com/data"
 print(result.final_output)
 ```
 
-## Other frameworks — use the implementation directly
+## Other Frameworks
 
-If the developer's framework isn't listed above, they can call `_x402_fetch_impl()` directly from whatever tool/function mechanism their framework provides. The core logic is pure Python with no framework dependencies.
+If the developer's framework is not listed above, they can call `_x402_fetch_impl()` directly from whatever tool/function mechanism their framework provides. The core logic is pure Python with no framework dependencies.

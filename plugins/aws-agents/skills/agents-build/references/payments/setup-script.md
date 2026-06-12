@@ -11,7 +11,9 @@ The script must:
 6. Create the Payment Instrument (wallet)
 7. Print a summary of all created resources and next steps
 
-Here is the template for the setup script. Substitute the developer's inputs:
+## Template
+
+Substitute the developer's inputs into the configuration section:
 
 ```python
 """
@@ -29,29 +31,28 @@ import boto3
 import json
 import uuid
 import time
-
-# Requires: pip install python-dotenv
-from dotenv import dotenv_values
+import os
 
 # === CONFIGURATION (from developer inputs) ===
 REGION = "<REGION>"                          # e.g., "ap-southeast-2"
 ACCOUNT_ID = "<ACCOUNT_ID>"                  # e.g., "123456789012"
 PROVIDER = "<PROVIDER>"                      # "CoinbaseCDP" or "StripePrivy"
 END_USER_EMAIL = "<END_USER_EMAIL>"          # e.g., "developer@example.com"
-RESOURCE_PREFIX = "paymentspoc"              # prefix for all resource names (alphanumeric + hyphens only, no underscores)
+RESOURCE_PREFIX = "paymentspoc"              # prefix for all resource names
 
-# Load provider credentials from .env.payments file (never hardcode in scripts)
-env = dotenv_values(".env.payments")
+# Read credentials from environment variables (NOT from file directly).
+# Run `source .env.payments` in your terminal before executing this script.
+# Do NOT pass credentials through the agent — they must stay local.
 
 # For Coinbase:
-COINBASE_API_KEY_ID = env.get("COINBASE_API_KEY_ID", "")
-COINBASE_API_KEY_SECRET = env.get("COINBASE_API_KEY_SECRET", "")
-COINBASE_WALLET_SECRET = env.get("COINBASE_WALLET_SECRET", "")
+COINBASE_API_KEY_ID = os.environ.get("COINBASE_API_KEY_ID", "")
+COINBASE_API_KEY_SECRET = os.environ.get("COINBASE_API_KEY_SECRET", "")
+COINBASE_WALLET_SECRET = os.environ.get("COINBASE_WALLET_SECRET", "")
 # For Stripe:
-AUTH_PRIVATE_KEY = env.get("AUTH_PRIVATE_KEY", "")
-AUTH_ID = env.get("AUTH_ID", "")
-PRIVY_APP_ID = env.get("PRIVY_APP_ID", "")
-PRIVY_APP_SECRET = env.get("PRIVY_APP_SECRET", "")
+AUTH_PRIVATE_KEY = os.environ.get("AUTH_PRIVATE_KEY", "")
+AUTH_ID = os.environ.get("AUTH_ID", "")
+PRIVY_APP_ID = os.environ.get("PRIVY_APP_ID", "")
+PRIVY_APP_SECRET = os.environ.get("PRIVY_APP_SECRET", "")
 
 # === CLIENTS ===
 iam = boto3.client("iam")
@@ -64,9 +65,8 @@ print("=" * 60)
 
 # === STEP 1: Store credentials ===
 print("\n[1/6] Storing payment provider credentials...")
-cred_name = f"{RESOURCE_PREFIX}-creds"  # hyphens only, no underscores
+cred_name = f"{RESOURCE_PREFIX}-creds"
 
-# Handle duplicate credential provider names by adding a suffix
 def create_credential_provider_with_retry(name, vendor, config, max_retries=5):
     """Create credential provider, appending a numeric suffix if name already exists."""
     for attempt in range(max_retries):
@@ -112,7 +112,7 @@ credential_provider_arn = cred_resp["credentialProviderArn"]
 print(f"  OK Credential Provider ARN: {credential_provider_arn}")
 
 # === STEP 2: Create IAM role ===
-print("\n[2/6] Creating IAM service role (ResourceRetrievalRole)...")
+print("\n[2/6] Creating IAM service role...")
 base_role_name = f"AgentCorePayments-{RESOURCE_PREFIX}"
 
 def create_role_with_retry(base_name, max_retries=5):
@@ -128,10 +128,13 @@ def create_role_with_retry(base_name, max_retries=5):
                         "Effect": "Allow",
                         "Principal": {"Service": "bedrock-agentcore.amazonaws.com"},
                         "Action": "sts:AssumeRole",
-                        "Condition": {"StringEquals": {"aws:SourceAccount": ACCOUNT_ID}}
+                        "Condition": {
+                            "StringEquals": {"aws:SourceAccount": ACCOUNT_ID},
+                            "ArnLike": {"aws:SourceArn": f"arn:aws:bedrock-agentcore:{REGION}:{ACCOUNT_ID}:payment-manager/{RESOURCE_PREFIX}-*"}
+                        }
                     }]
                 }),
-                Description="Service role for AgentCore Payments — assumed by the service to retrieve credentials and sign transactions"
+                Description="Service role for AgentCore Payments"
             )
             print(f"  (Using role name: {unique_name})")
             return unique_name
@@ -180,7 +183,7 @@ time.sleep(15)
 # === STEP 3: Create Payment Manager ===
 print("\n[3/6] Creating Payment Manager...")
 mgr_resp = cp_client.create_payment_manager(
-    name=RESOURCE_PREFIX,  # no underscores allowed
+    name=RESOURCE_PREFIX,
     description="Payment manager created by AgentCore Payments skill",
     authorizerType="AWS_IAM",
     roleArn=role_arn,
@@ -189,9 +192,8 @@ mgr_resp = cp_client.create_payment_manager(
 payment_manager_arn = mgr_resp["paymentManagerArn"]
 manager_id = mgr_resp["paymentManagerId"]
 print(f"  OK Payment Manager ARN: {payment_manager_arn}")
-print(f"  OK Manager ID: {manager_id}")
 
-# Wait for READY — use paymentManagerId (not ARN) for get_payment_manager
+# Wait for READY
 for i in range(12):
     status_resp = cp_client.get_payment_manager(paymentManagerId=manager_id)
     if status_resp["status"] == "READY":
@@ -203,8 +205,8 @@ print(f"  OK Status: {status_resp['status']}")
 print("\n[4/6] Creating Payment Connector...")
 connector_config_key = "coinbaseCDP" if PROVIDER == "CoinbaseCDP" else "stripePrivy"
 conn_resp = cp_client.create_payment_connector(
-    paymentManagerId=manager_id,  # CP uses paymentManagerId
-    name=f"{RESOURCE_PREFIX}connector",  # no underscores
+    paymentManagerId=manager_id,
+    name=f"{RESOURCE_PREFIX}connector",
     description=f"{PROVIDER} connector",
     type=PROVIDER,
     credentialProviderConfigurations=[{
@@ -219,7 +221,7 @@ print(f"  OK Connector ID: {connector_id}")
 print("\n[5/6] Creating Payment Instrument (wallet)...")
 user_id = f"{RESOURCE_PREFIX}-user"
 instr_resp = dp_client.create_payment_instrument(
-    paymentManagerArn=payment_manager_arn,  # DP uses ARN
+    paymentManagerArn=payment_manager_arn,
     paymentConnectorId=connector_id,
     userId=user_id,
     paymentInstrumentType="EMBEDDED_CRYPTO_WALLET",
@@ -233,7 +235,6 @@ instr_resp = dp_client.create_payment_instrument(
     },
     clientToken=str(uuid.uuid4())
 )
-# Response structure: {"paymentInstrument": {...}}
 instrument_data = instr_resp.get("paymentInstrument", instr_resp)
 payment_instrument_id = instrument_data["paymentInstrumentId"]
 wallet_details = instrument_data.get("paymentInstrumentDetails", {}).get("embeddedCryptoWallet", {})
@@ -241,14 +242,12 @@ wallet_address = wallet_details.get("walletAddress", "pending")
 redirect_url = wallet_details.get("redirectUrl", None)
 print(f"  OK Instrument ID: {payment_instrument_id}")
 print(f"  OK Wallet Address: {wallet_address}")
-if redirect_url:
-    print(f"  OK Delegation URL: {redirect_url}")
 
 # === STEP 6: Create Payment Session ===
 print("\n[6/6] Creating Payment Session...")
 session_resp = dp_client.create_payment_session(
     paymentManagerArn=payment_manager_arn,
-    userId=user_id,  # required — identifies whose wallet to use
+    userId=user_id,
     expiryTimeInMinutes=60
 )
 payment_session_id = session_resp["paymentSession"]["paymentSessionId"]
@@ -278,26 +277,23 @@ Environment variables for your agent:
 
 if redirect_url:
     print(f"""
-WARNING: MANUAL STEPS REQUIRED:
+MANUAL STEPS REQUIRED:
 
 1. DELEGATION — Grant the agent permission to spend from the wallet:
-   a. Visit: {redirect_url}
-   b. Log in with: {END_USER_EMAIL}
-   c. Select the wallet address: {wallet_address}
-   d. Click "Grant Permissions"
-   e. Choose a permission duration (e.g., 30 days for testing)
-   f. Confirm the delegation
+   Visit: {redirect_url}
+   Log in with: {END_USER_EMAIL}
+   Grant permissions to the wallet address: {wallet_address}
 
 2. FUNDING — Send testnet USDC to the wallet:
-   a. Go to: https://faucet.circle.com/
-   b. Select: Base Sepolia
-   c. Paste wallet address: {wallet_address}
-   d. Request USDC (may take 30-60 seconds to arrive)
+   Go to: https://faucet.circle.com/
+   Select: Base Sepolia
+   Paste wallet address: {wallet_address}
 """)
 ```
 
 ## After executing the script
 
+- Tell the developer to run `source .env.payments` before executing the script
 - Print the summary to the developer
 - Tell them to complete the **two manual steps** (delegation + funding)
 - Wait for them to confirm before proceeding to Step 5 (wiring)
