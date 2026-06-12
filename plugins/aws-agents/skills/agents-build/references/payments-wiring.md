@@ -16,6 +16,14 @@ Once the developer confirms delegation and funding are done, **modify their exis
 >
 > **Critical: Use a fresh httpx client for the retry.** Some merchants set cookies
 > on the 402 response that cause the retry to fail if sent back.
+>
+> **Version-aware proof.** The tool reads `x402Version` from the challenge and
+> builds the matching proof: v1 sends an `X-PAYMENT` header with a flat proof
+> (top-level `scheme`/`network`), v2 sends a `PAYMENT-SIGNATURE` header where
+> `accepted` is a top-level sibling of `payload` and `payload` holds only
+> `signature` + `authorization` (no top-level `scheme`/`network`). The
+> `ProcessPayment` input is the same for both (always CAIP-2 network); only the
+> proof presented to the merchant differs.
 
 ## Core Payment Logic (shared across all frameworks)
 
@@ -151,25 +159,61 @@ def _x402_fetch_impl(url: str, method: str = "GET") -> str:
             "error": f"ProcessPayment failed: {e}"
         })
 
-    # --- Build X-PAYMENT header proof ---
+    # --- Build the payment header proof (version-aware) ---
+    # ProcessPayment input above is identical for v1 and v2 (always CAIP-2).
+    # Only the proof presented to the merchant differs by x402 version.
     crypto_output = payment_response["paymentOutput"]["cryptoX402"]
     auth = crypto_output["payload"]["authorization"]
-    proof = {
-        "x402Version": 1,
-        "scheme": "exact",
-        "network": accepts["network"],
-        "payload": {
-            "signature": crypto_output["payload"]["signature"],
-            "authorization": {
-                "from": auth["from"],
-                "to": auth["to"],
-                "value": auth["value"],
-                "validAfter": auth["validAfter"],
-                "validBefore": auth["validBefore"],
-                "nonce": auth["nonce"]
+    x402_version = int(x402_challenge.get("x402Version", 1))
+
+    authorization = {
+        "from": auth["from"],
+        "to": auth["to"],
+        "value": auth["value"],
+        "validAfter": auth["validAfter"],
+        "validBefore": auth["validBefore"],
+        "nonce": auth["nonce"]
+    }
+
+    if x402_version >= 2:
+        # x402 v2: header is PAYMENT-SIGNATURE. `accepted` is a TOP-LEVEL sibling
+        # of `payload` (echoing the merchant's accepted entry, CAIP-2 network).
+        # `payload` holds ONLY signature + authorization. There are NO top-level
+        # scheme/network fields. This matches the Coinbase facilitator
+        # x402V2PaymentPayload schema.
+        proof = {
+            "x402Version": 2,
+            "accepted": {
+                "scheme": accepts.get("scheme", "exact"),
+                "network": accepts["network"],
+                "amount": accepts.get("amount", accepts.get("maxAmountRequired", "0")),
+                "asset": accepts["asset"],
+                "payTo": accepts["payTo"],
+                "maxTimeoutSeconds": accepts.get("maxTimeoutSeconds", 60),
+                **({"extra": accepts["extra"]} if "extra" in accepts else {})
+            },
+            "payload": {
+                "signature": crypto_output["payload"]["signature"],
+                "authorization": authorization
             }
         }
-    }
+        # Optionally echo the resource block from the challenge if present.
+        if "resource" in x402_challenge:
+            proof["resource"] = x402_challenge["resource"]
+        payment_header_name = "PAYMENT-SIGNATURE"
+    else:
+        # x402 v1: header is X-PAYMENT, proof is flat (top-level scheme/network).
+        proof = {
+            "x402Version": 1,
+            "scheme": "exact",
+            "network": accepts["network"],
+            "payload": {
+                "signature": crypto_output["payload"]["signature"],
+                "authorization": authorization
+            }
+        }
+        payment_header_name = "X-PAYMENT"
+
     payment_header = base64.b64encode(
         json.dumps(proof, separators=(',', ':')).encode()
     ).decode()
@@ -178,14 +222,18 @@ def _x402_fetch_impl(url: str, method: str = "GET") -> str:
     with httpx.Client(verify=True) as client:
         retry_response = client.request(
             method, url,
-            headers={"X-PAYMENT": payment_header},
+            headers={payment_header_name: payment_header},
             timeout=30
         )
 
+    # payment_made reflects the actual retry status — a 2xx means the merchant
+    # accepted the proof. Do NOT hardcode this True: ProcessPayment can succeed
+    # (proof generated) while the retry still returns 402 (e.g. wrong proof
+    # shape, expired proof, or an on-chain settlement failure).
     return json.dumps({
         "status_code": retry_response.status_code,
         "body": retry_response.text,
-        "payment_made": True,
+        "payment_made": 200 <= retry_response.status_code < 300,
         "process_payment_id": payment_response.get("processPaymentId", "unknown")
     })
 ```

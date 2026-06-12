@@ -90,7 +90,7 @@ Based on the developer's prompt and `$ARGUMENTS`, load the appropriate reference
 | Developer intent | Reference to load |
 |---|---|
 | Add memory, remember things, user preferences, cross-session | [`references/memory.md`](references/memory.md) |
-| Add payments, 402 Payment Required, x402, pay for content, paywall, micropayment, paid API, payment instrument, payment session | [`references/payments/payments.md`](references/payments/payments.md) |
+| Add payments, 402 Payment Required, x402, pay for content, paywall, micropayment, paid API, payment instrument, payment session | [`references/payments.md`](references/payments.md) |
 | Call agent from app, invoke from code, streaming, SDK client, agent URL, execute shell in session | [`references/integrate.md`](references/integrate.md) |
 | VPC, private network, RDS, internal API, subnet, security group | [`references/vpc.md`](references/vpc.md) |
 | Multi-agent, orchestrator, specialist, A2A, delegation, agent handoff | [`references/multi-agent.md`](references/multi-agent.md) |

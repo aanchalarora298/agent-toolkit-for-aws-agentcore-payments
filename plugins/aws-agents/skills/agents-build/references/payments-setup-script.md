@@ -275,16 +275,25 @@ Environment variables for your agent:
   export AWS_REGION="{REGION}"
 """)
 
-if redirect_url:
-    print(f"""
-MANUAL STEPS REQUIRED:
+print("\nMANUAL STEPS REQUIRED:\n")
 
-1. DELEGATION — Grant the agent permission to spend from the wallet:
+# Step 1: Delegation — provider-specific
+if PROVIDER == "CoinbaseCDP":
+    print(f"""1. DELEGATION — Grant the agent permission to spend from the wallet:
    Visit: {redirect_url}
    Log in with: {END_USER_EMAIL}
    Grant permissions to the wallet address: {wallet_address}
+""")
+elif PROVIDER == "StripePrivy":
+    print(f"""1. DELEGATION — Enable delegation on the embedded wallet:
+   a. Set up a frontend using the Privy frontend SDK:
+      https://github.com/privy-io/aws-agentcore-sdk
+   b. Log in with the end user email: {END_USER_EMAIL}
+   c. Approve delegation for the wallet address: {wallet_address}
+""")
 
-2. FUNDING — Send testnet USDC to the wallet:
+# Step 2: Funding — same for both providers
+print(f"""2. FUNDING — Send testnet USDC to the wallet:
    Go to: https://faucet.circle.com/
    Select: Base Sepolia
    Paste wallet address: {wallet_address}
@@ -295,5 +304,6 @@ MANUAL STEPS REQUIRED:
 
 - Tell the developer to run `source .env.payments` before executing the script
 - Print the summary to the developer
-- Tell them to complete the **two manual steps** (delegation + funding)
+- Tell them to complete the **two manual steps** (delegation + funding) for the provider they chose
+- Do NOT reference the other provider's flow — only show steps for the provider in use
 - Wait for them to confirm before proceeding to Step 5 (wiring)
