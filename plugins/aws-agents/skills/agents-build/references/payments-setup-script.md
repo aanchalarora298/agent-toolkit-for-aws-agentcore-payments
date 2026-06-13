@@ -199,6 +199,11 @@ for i in range(12):
     if status_resp["status"] == "READY":
         break
     time.sleep(5)
+if status_resp["status"] != "READY":
+    raise Exception(
+        f"Payment Manager did not reach READY status after 60s "
+        f"(current: {status_resp['status']}). Check CloudTrail for errors."
+    )
 print(f"  OK Status: {status_resp['status']}")
 
 # === STEP 4: Create Payment Connector ===

@@ -100,9 +100,9 @@ Once you have answers 1-5, show the provider-specific `.env.payments` template a
 
    ```bash
    # .env.payments — DO NOT COMMIT THIS FILE
-   COINBASE_API_KEY_ID=your-api-key-id-uuid-here
-   COINBASE_API_KEY_SECRET=your-base64-encoded-api-key-secret-here
-   COINBASE_WALLET_SECRET=your-base64-encoded-wallet-secret-here
+   export COINBASE_API_KEY_ID=your-api-key-id-uuid-here
+   export COINBASE_API_KEY_SECRET=your-base64-encoded-api-key-secret-here
+   export COINBASE_WALLET_SECRET=your-base64-encoded-wallet-secret-here
    ```
 
    For **Stripe Privy** (get credentials from https://dashboard.privy.io/):
@@ -116,10 +116,10 @@ Once you have answers 1-5, show the provider-specific `.env.payments` template a
 
    ```bash
    # .env.payments — DO NOT COMMIT THIS FILE
-   AUTH_PRIVATE_KEY=your-base64-encoded-ec-private-key-here
-   AUTH_ID=your-hex-auth-id-here
-   PRIVY_APP_ID=your-privy-app-id-here
-   PRIVY_APP_SECRET=privy_app_secret_your-secret-here
+   export AUTH_PRIVATE_KEY=your-base64-encoded-ec-private-key-here
+   export AUTH_ID=your-hex-auth-id-here
+   export PRIVY_APP_ID=your-privy-app-id-here
+   export PRIVY_APP_SECRET=privy_app_secret_your-secret-here
    ```
 
    > [!WARNING]
@@ -159,7 +159,7 @@ The `x402_fetch` tool:
 1. Makes an HTTP request to the target URL
 2. If 402, extracts the x402 challenge from body or `payment-required` header
 3. Calls `ProcessPayment` to get a signed payment proof
-4. Retries with the `X-PAYMENT` header (fresh HTTP client to avoid cookie contamination)
+4. Retries with the payment header (`X-PAYMENT` for v1, `PAYMENT-SIGNATURE` for v2) using a fresh HTTP client to avoid cookie contamination
 5. Returns the paid content
 
 ### Step 6: Test the integration
@@ -188,7 +188,7 @@ Expected behavior:
 1. Agent calls `x402_fetch` with the URL
 2. Gets 402 with x402 challenge (0.1 USDC on Base Sepolia)
 3. Calls ProcessPayment → gets signed proof
-4. Retries with `X-PAYMENT` header → gets 200
+4. Retries with `PAYMENT-SIGNATURE` header (v2 endpoint) → gets 200
 5. Returns the content to the user
 
 If the session has expired, create a fresh one:
@@ -319,7 +319,7 @@ For testing, start with **Base Sepolia** (network: `ETHEREUM`, chain: `BASE_SEPO
 
 - The USDC contract address in the x402 challenge does not match the expected address for that network.
 - Base Sepolia USDC: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
-- Only USDC is supported currently.
+- Only USDC is supported.
 
 **ProcessPayment fails with "Wallet does not have a USDC balance":**
 
